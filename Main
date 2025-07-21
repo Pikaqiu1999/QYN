@@ -1,1 +1,183 @@
-1111111111ddsa
+import os
+import time
+from Crypto.Cipher import AES, PKCS1_OAEP
+from Crypto.Random import get_random_bytes
+from Crypto.PublicKey import RSA
+import tenseal as ts
+import numpy as np
+
+
+# 生成随机数据
+def generate_random_data(size):
+    return os.urandom(size)
+
+
+# AES 加密
+def aes_encrypt(data, key):
+    cipher = AES.new(key, AES.MODE_CBC)
+    iv = cipher.iv
+    padded_data = data + b"\0" * (AES.block_size - len(data) % AES.block_size)
+    encrypted_data = cipher.encrypt(padded_data)
+    return iv + encrypted_data
+
+
+# AES 解密
+def aes_decrypt(encrypted_data, key):
+    iv = encrypted_data[:AES.block_size]
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+    decrypted_data = cipher.decrypt(encrypted_data[AES.block_size:])
+    return decrypted_data.rstrip(b"\0")
+
+
+# RSA 加密
+def rsa_encrypt(data, public_key):
+    cipher = PKCS1_OAEP.new(public_key)
+    return cipher.encrypt(data)
+
+
+# RSA 解密
+def rsa_decrypt(encrypted_data, private_key):
+    cipher = PKCS1_OAEP.new(private_key)
+    return cipher.decrypt(encrypted_data)
+
+
+# CKKS 加密
+def ckks_encrypt(data, context):
+    vector = ts.ckks_vector(context, data)
+    return vector
+
+
+# CKKS 解密
+def ckks_decrypt(encrypted_vector):
+    return encrypted_vector.decrypt()
+
+
+# 测试函数
+def test_encryption(data, aes_key_size=128, rsa_key_size=3072):
+    # AES 测试
+    aes_key = get_random_bytes(aes_key_size // 8)
+    start_time = time.time()
+    aes_encrypted_data = aes_encrypt(data, aes_key)
+    aes_encrypt_time = time.time() - start_time
+    start_time = time.time()
+    aes_decrypted_data = aes_decrypt(aes_encrypted_data, aes_key)
+    aes_decrypt_time = time.time() - start_time
+    aes_communication_overhead = len(aes_encrypted_data)
+    aes_plaintext_expansion = aes_communication_overhead / len(data)
+
+    # RSA 测试
+    rsa_key = RSA.generate(rsa_key_size)
+    rsa_public_key = rsa_key.publickey()
+    rsa_private_key = rsa_key
+
+
+
+    private_key = rsa_key.export_key()
+    print("私钥 (PEM 格式):")
+    print(private_key.decode('utf-8'))
+
+    # 输出公钥
+    public_key = rsa_key.publickey().export_key()
+    print("\n公钥 (PEM 格式):")
+    print(public_key.decode('utf-8'))
+
+
+
+    rsa_max_plaintext_length = rsa_public_key.size_in_bytes() - 42  # 42 字节为填充长度
+    rsa_encrypted_data = b""
+    rsa_decrypted_data = b""
+    for i in range(0, len(data), rsa_max_plaintext_length):
+        chunk = data[i:i + rsa_max_plaintext_length]
+        rsa_encrypted_data += rsa_encrypt(chunk, rsa_public_key)
+    start_time = time.time()
+    rsa_encrypt_time = time.time() - start_time
+    start_time = time.time()
+    for i in range(0, len(rsa_encrypted_data), rsa_private_key.size_in_bytes()):
+        chunk = rsa_encrypted_data[i:i + rsa_private_key.size_in_bytes()]
+        rsa_decrypted_data += rsa_decrypt(chunk, rsa_private_key)
+    rsa_decrypt_time = time.time() - start_time
+    rsa_communication_overhead = len(rsa_encrypted_data)
+    rsa_plaintext_expansion = rsa_communication_overhead / len(data)
+
+    # CKKS 测试
+    context = ts.context(ts.SCHEME_TYPE.CKKS, poly_modulus_degree=8192, coeff_mod_bit_sizes=[60, 40, 40])
+    context.generate_galois_keys()
+    context.global_scale = 2 ** 40
+    data_float = np.frombuffer(data, dtype=np.float64)
+    start_time = time.time()
+    ckks_encrypted_vector = ckks_encrypt(data_float, context)
+    ckks_encrypt_time = time.time() - start_time
+    start_time = time.time()
+    ckks_decrypted_data = ckks_decrypt(ckks_encrypted_vector)
+    ckks_decrypt_time = time.time() - start_time
+    ckks_communication_overhead = len(ckks_encrypted_vector.serialize())
+    ckks_plaintext_expansion = ckks_communication_overhead / len(data)
+
+    # 输出结果
+    print("AES 加密时间: {:.6f} 秒".format(aes_encrypt_time))
+    print("AES 解密时间: {:.6f} 秒".format(aes_decrypt_time))
+    print("AES 通信开销: {} 字节".format(aes_communication_overhead))
+    print("AES 明文扩展: {:.2f} 倍".format(aes_plaintext_expansion))
+    print("RSA 加密时间: {:.6f} 秒".format(rsa_encrypt_time))
+    print("RSA 解密时间: {:.6f} 秒".format(rsa_decrypt_time))
+    print("RSA 通信开销: {} 字节".format(rsa_communication_overhead))
+    print("RSA 明文扩展: {:.2f} 倍".format(rsa_plaintext_expansion))
+    print("CKKS 加密时间: {:.6f} 秒".format(ckks_encrypt_time))
+    print("CKKS 解密时间: {:.6f} 秒".format(ckks_decrypt_time))
+    print("CKKS 通信开销: {} 字节".format(ckks_communication_overhead))
+    print("CKKS 明文扩展: {:.2f} 倍".format(ckks_plaintext_expansion))
+
+
+# 主函数
+if __name__ == "__main__":
+    data_size = 1 * 1024 * 1024  # 1MB
+    data = generate_random_data(data_size)
+    test_encryption(data)
+
+import numpy as np
+import time
+from scipy.sparse.linalg import svds
+
+
+# 生成随机像素灰度矩阵
+def generate_random_image(size):
+    return np.random.randint(0, 256, size=(size, size), dtype=np.uint8)
+
+def reconstruct_image(sampled_data, sampling_matrix, image_size):
+    # 使用最小二乘法重构
+    n = sampling_matrix.shape[1]
+    reconstructed_image = np.linalg.lstsq(sampling_matrix, sampled_data, rcond=None)[0].reshape(image_size, image_size)
+    return reconstructed_image
+
+
+# 测试函数
+def test_compressive_sensing(image_size=1024, k=1, m=256):
+    # 生成随机图像
+    image = generate_random_image(image_size)
+    sampling_matrix = np.random.randn(256, 1024)
+
+    # 随机采样
+    start_time = time.time()
+    sampled_data = np.matmul(sampling_matrix, image)
+
+    total_time = time.time() - start_time
+    print("总计算开销: {:.6f} 秒".format(total_time))
+    # 重构
+    start_time = time.time()
+    reconstructed_image = reconstruct_image(sampled_data, sampling_matrix, image_size)
+    reconstruction_time = time.time() - start_time
+    total_time=reconstruction_time
+    # 通信开销
+    original_size = image.nbytes
+    sampled_size = sampled_data.nbytes
+    communication_overhead = sampled_size / original_size
+
+    print("总计算开销: {:.6f} 秒".format(total_time))
+    print("CS通信开销: {} 字节".format(  sampled_size ))
+
+    print("明文扩展: {:.2f} 倍".format(communication_overhead))
+
+
+# 主函数
+if __name__ == "__main__":
+    test_compressive_sensing()
